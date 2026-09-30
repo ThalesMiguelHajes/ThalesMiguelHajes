@@ -1,346 +1,424 @@
-// Meteor Dash — mini-jogo arcade em PixiJS v8 (sem assets externos: tudo é desenhado por código).
-// Controles: WASD/setas ou mouse/toque para mover · tiro automático · P/Esc pausa · M som.
+// Meteor Dash
+// Fiz pra treinar PixiJS vindo da Godot. Tudo aqui é desenhado por código,
+// sem imagem nenhuma, então dá pra abrir direto sem baixar nada.
+//
+// WASD/setas ou mouse/dedo pra mexer, o tiro é automático.
+// P ou Esc pausa, M liga/desliga o som.
 
 (async () => {
-  const COLORS = { bg: 0x0d1110, green: 0x7dff9b, gold: 0xf5c84c, white: 0xffffff, rock: 0x1d2622 };
-  const MAX_LIVES = 3;
-  const FIRE_DELAY = 0.2;
-  const SHIP_SPEED = 420;
+  const COR = { fundo: 0x0d1110, verde: 0x7dff9b, ouro: 0xf5c84c, branco: 0xffffff, pedra: 0x1d2622 };
+  const VIDAS = 3;
+  const INTERVALO_TIRO = 0.2; // segundos
+  const VEL_NAVE = 420;
 
   const app = new PIXI.Application();
   await app.init({
     resizeTo: window,
-    background: COLORS.bg,
+    background: COR.fundo,
     antialias: true,
-    resolution: Math.min(window.devicePixelRatio || 1, 2),
+    resolution: Math.min(window.devicePixelRatio || 1, 2), // 2 já tá ótimo, mais que isso só pesa no celular
     autoDensity: true,
   });
   document.body.appendChild(app.canvas);
 
-  const world = new PIXI.Container();
+  // mundo = tudo que treme junto, ui = textos que ficam parados
+  const mundo = new PIXI.Container();
   const ui = new PIXI.Container();
-  app.stage.addChild(world, ui);
+  app.stage.addChild(mundo, ui);
 
-  // ---------- util ----------
   const rand = (a, b) => a + Math.random() * (b - a);
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const dist2 = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+  const limita = (v, a, b) => Math.max(a, Math.min(b, v));
+  const dist2 = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2; // sem raiz, é mais barato comparar assim
 
-  const store = {
-    get: () => { try { return Number(localStorage.getItem('meteor-dash-best')) || 0; } catch { return 0; } },
-    set: v => { try { localStorage.setItem('meteor-dash-best', String(v)); } catch { /* ignore */ } },
-  };
-
-  // ---------- som (WebAudio, criado só após o primeiro input) ----------
-  let audio = null;
-  let muted = false;
-  function beep(freq, dur, type = 'square', vol = 0.05, slide = 0) {
-    if (muted) return;
-    try {
-      audio ??= new (window.AudioContext || window.webkitAudioContext)();
-      const o = audio.createOscillator();
-      const g = audio.createGain();
-      o.type = type;
-      o.frequency.setValueAtTime(freq, audio.currentTime);
-      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), audio.currentTime + dur);
-      g.gain.setValueAtTime(vol, audio.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + dur);
-      o.connect(g).connect(audio.destination);
-      o.start();
-      o.stop(audio.currentTime + dur);
-    } catch { /* áudio indisponível */ }
+  // localStorage pode dar erro (aba anônima, por ex), por isso o try
+  function lerRecorde() {
+    try { return Number(localStorage.getItem('meteor-dash-recorde')) || 0; } catch { return 0; }
   }
-  const sfx = {
-    shoot: () => beep(880, 0.06, 'square', 0.025, -400),
-    hit: () => beep(220, 0.08, 'triangle', 0.06, -80),
-    boom: () => beep(160, 0.25, 'sawtooth', 0.07, -120),
-    hurt: () => beep(120, 0.45, 'sawtooth', 0.09, -90),
-    start: () => beep(440, 0.15, 'square', 0.05, 440),
+  function salvarRecorde(v) {
+    try { localStorage.setItem('meteor-dash-recorde', String(v)); } catch { /* paciência */ }
+  }
+
+  // ---------- som ----------
+  // Sem arquivo de áudio: uns bips com oscilador já dão o clima retrô.
+  // O AudioContext só nasce no primeiro som, porque o navegador bloqueia antes de ter clique.
+  let audio = null;
+  let mudo = false;
+
+  function bip(freq, dur, tipo = 'square', vol = 0.05, desliza = 0) {
+    if (mudo) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audio.createOscillator();
+      const ganho = audio.createGain();
+      const t = audio.currentTime;
+      osc.type = tipo;
+      osc.frequency.setValueAtTime(freq, t);
+      if (desliza) osc.frequency.exponentialRampToValueAtTime(Math.max(30, freq + desliza), t + dur);
+      ganho.gain.setValueAtTime(vol, t);
+      ganho.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(ganho).connect(audio.destination);
+      osc.start();
+      osc.stop(t + dur);
+    } catch { /* sem áudio, segue o jogo */ }
+  }
+
+  const som = {
+    tiro: () => bip(880, 0.06, 'square', 0.025, -400),
+    acerto: () => bip(220, 0.08, 'triangle', 0.06, -80),
+    explosao: () => bip(160, 0.25, 'sawtooth', 0.07, -120),
+    dano: () => bip(120, 0.45, 'sawtooth', 0.09, -90),
+    inicio: () => bip(440, 0.15, 'square', 0.05, 440),
   };
 
-  // ---------- fundo: estrelas com parallax ----------
-  const stars = [];
+  // ---------- estrelas do fundo ----------
+  // as mais brilhantes caem mais rápido, dá uma sensação de profundidade barata
+  const estrelas = [];
   for (let i = 0; i < 120; i++) {
-    const layer = Math.random();
-    const g = new PIXI.Graphics().circle(0, 0, 0.6 + layer * 1.6).fill({ color: COLORS.white, alpha: 0.2 + layer * 0.5 });
+    const prof = Math.random();
+    const g = new PIXI.Graphics().circle(0, 0, 0.6 + prof * 1.6).fill({ color: COR.branco, alpha: 0.2 + prof * 0.5 });
     g.x = Math.random() * app.screen.width;
     g.y = Math.random() * app.screen.height;
-    world.addChild(g);
-    stars.push({ g, speed: 20 + layer * 120 });
+    mundo.addChild(g);
+    estrelas.push({ g, vel: 20 + prof * 120 });
   }
 
-  // ---------- entidades ----------
-  const ship = new PIXI.Graphics()
-    .poly([0, -20, 15, 14, 0, 7, -15, 14]).fill(COLORS.green)
-    .poly([0, -8, 5, 6, -5, 6]).fill(COLORS.bg);
-  ship.radius = 11;
-  const flame = new PIXI.Graphics().poly([-5, 10, 5, 10, 0, 24]).fill(COLORS.gold);
-  ship.addChild(flame);
-  world.addChild(ship);
+  function moverEstrelas(dt) {
+    for (const e of estrelas) {
+      e.g.y += e.vel * dt;
+      if (e.g.y > app.screen.height) {
+        e.g.y = 0;
+        e.g.x = Math.random() * app.screen.width;
+      }
+    }
+  }
 
-  let bullets = [];
-  let rocks = [];
-  let particles = [];
+  // ---------- nave ----------
+  const nave = new PIXI.Graphics()
+    .poly([0, -20, 15, 14, 0, 7, -15, 14]).fill(COR.verde)
+    .poly([0, -8, 5, 6, -5, 6]).fill(COR.fundo); // o "buraco" da cabine
+  nave.raio = 11; // hitbox menor que o desenho, senão parece injusto
+  const chama = new PIXI.Graphics().poly([-5, 10, 5, 10, 0, 24]).fill(COR.ouro);
+  nave.addChild(chama);
+  mundo.addChild(nave);
 
-  function spawnBullet(x, y, vx) {
-    const g = new PIXI.Graphics().roundRect(-2, -8, 4, 14, 2).fill(COLORS.green);
-    g.x = x; g.y = y; g.radius = 5;
+  let tiros = [];
+  let pedras = [];
+  let faiscas = [];
+
+  function criarTiro(x, y, vx) {
+    const g = new PIXI.Graphics().roundRect(-2, -8, 4, 14, 2).fill(COR.verde);
+    g.x = x; g.y = y;
+    g.raio = 5;
     g.vx = vx; g.vy = -720;
-    world.addChild(g);
-    bullets.push(g);
+    mundo.addChild(g);
+    tiros.push(g);
   }
 
-  const ROCK_RADIUS = [0, 15, 27, 44];
-  function spawnRock(size, x, y, vx, vy) {
-    const r = ROCK_RADIUS[size];
+  const RAIO_PEDRA = [0, 15, 27, 44]; // indexado pelo tamanho (1, 2 ou 3)
+
+  function criarPedra(tam, x, y, vx, vy) {
+    const r = RAIO_PEDRA[tam];
     const pts = [];
-    const n = 10;
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      const rr = r * rand(0.8, 1.1);
-      pts.push(Math.cos(a) * rr, Math.sin(a) * rr);
+    const lados = 10;
+    for (let i = 0; i < lados; i++) {
+      const ang = (i / lados) * Math.PI * 2;
+      const rr = r * rand(0.8, 1.1); // cada pedra sai meio torta
+      pts.push(Math.cos(ang) * rr, Math.sin(ang) * rr);
     }
-    const g = new PIXI.Graphics().poly(pts).fill(COLORS.rock).stroke({ width: 2, color: COLORS.gold });
-    g.x = x; g.y = y; g.radius = r * 0.9;
+    const g = new PIXI.Graphics().poly(pts).fill(COR.pedra).stroke({ width: 2, color: COR.ouro });
+    g.x = x; g.y = y;
+    g.raio = r * 0.9;
     g.vx = vx; g.vy = vy;
-    g.spin = rand(-1.5, 1.5);
-    g.size = size; g.hp = size;
-    world.addChild(g);
-    rocks.push(g);
+    g.giro = rand(-1.5, 1.5);
+    g.tam = tam;
+    g.vida = tam; // pedra grande aguenta mais tiro
+    mundo.addChild(g);
+    pedras.push(g);
   }
 
-  function burst(x, y, color, count, power = 160) {
-    for (let i = 0; i < count; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const s = rand(0.3, 1) * power;
-      const g = new PIXI.Graphics().circle(0, 0, rand(1, 2.6)).fill(color);
+  function explodir(x, y, cor, qtd, forca = 160) {
+    for (let i = 0; i < qtd; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const vel = rand(0.3, 1) * forca;
+      const g = new PIXI.Graphics().circle(0, 0, rand(1, 2.6)).fill(cor);
       g.x = x; g.y = y;
-      g.vx = Math.cos(a) * s; g.vy = Math.sin(a) * s;
-      g.life = g.maxLife = rand(0.3, 0.7);
-      world.addChild(g);
-      particles.push(g);
+      g.vx = Math.cos(ang) * vel;
+      g.vy = Math.sin(ang) * vel;
+      g.vida = g.vidaMax = rand(0.3, 0.7);
+      mundo.addChild(g);
+      faiscas.push(g);
     }
   }
 
-  // ---------- HUD ----------
-  const font = 'ui-monospace, Consolas, monospace';
-  const mkText = (size, fill, align = 'left') =>
-    new PIXI.Text({ text: '', style: { fontFamily: font, fontSize: size, fill, align, fontWeight: '700', letterSpacing: 1 } });
-  const scoreText = mkText(20, COLORS.green);
-  const livesText = mkText(20, COLORS.gold);
-  const bestText = mkText(13, 0x8fa199);
-  const centerText = mkText(34, COLORS.white, 'center');
-  const subText = mkText(15, 0x8fa199, 'center');
-  centerText.anchor.set(0.5);
-  subText.anchor.set(0.5, 0);
-  livesText.anchor.set(1, 0);
-  ui.addChild(scoreText, livesText, bestText, centerText, subText);
-
-  // ---------- estado ----------
-  let state = 'menu'; // menu | playing | paused | over
-  let score = 0, lives = MAX_LIVES, time = 0;
-  let spawnTimer = 0, fireTimer = 0, invuln = 0, shake = 0;
-  let best = store.get();
-
-  function weaponLevel() { return Math.min(3, 1 + Math.floor(score / 1500)); }
-
-  function resetGame() {
-    [...bullets, ...rocks, ...particles].forEach(o => o.destroy());
-    bullets = []; rocks = []; particles = [];
-    score = 0; lives = MAX_LIVES; time = 0; spawnTimer = 0; fireTimer = 0; invuln = 1.5; shake = 0;
-    ship.x = app.screen.width / 2;
-    ship.y = app.screen.height * 0.8;
-    ship.visible = true;
+  function moverFaiscas(dt) {
+    for (const f of faiscas) {
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      f.vida -= dt;
+      f.alpha = Math.max(0, f.vida / f.vidaMax);
+    }
   }
 
-  function startGame() {
-    resetGame();
-    state = 'playing';
-    sfx.start();
+  // ---------- textos ----------
+  const fonte = 'ui-monospace, Consolas, monospace';
+  const criarTexto = (tam, cor, align = 'left') =>
+    new PIXI.Text({ text: '', style: { fontFamily: fonte, fontSize: tam, fill: cor, align, fontWeight: '700', letterSpacing: 1 } });
+
+  const txtPontos = criarTexto(20, COR.verde);
+  const txtVidas = criarTexto(20, COR.ouro);
+  const txtRecorde = criarTexto(13, 0x8fa199);
+  const txtTitulo = criarTexto(34, COR.branco, 'center');
+  const txtAjuda = criarTexto(15, 0x8fa199, 'center');
+  txtTitulo.anchor.set(0.5);
+  txtAjuda.anchor.set(0.5, 0);
+  txtVidas.anchor.set(1, 0);
+  ui.addChild(txtPontos, txtVidas, txtRecorde, txtTitulo, txtAjuda);
+
+  // ---------- estado do jogo ----------
+  let estado = 'menu'; // menu | jogando | pausado | fim
+  let pontos = 0, vidas = VIDAS, tempo = 0;
+  let timerPedra = 0, timerTiro = 0, invencivel = 0, tremor = 0;
+  let recorde = lerRecorde();
+
+  // a cada 1500 pontos a arma melhora, até o nível 3
+  const nivelArma = () => Math.min(3, 1 + Math.floor(pontos / 1500));
+
+  function zerar() {
+    [...tiros, ...pedras, ...faiscas].forEach(o => o.destroy());
+    tiros = []; pedras = []; faiscas = [];
+    pontos = 0; vidas = VIDAS; tempo = 0;
+    timerPedra = 0; timerTiro = 0; tremor = 0;
+    invencivel = 1.5; // um respiro no começo
+    nave.x = app.screen.width / 2;
+    nave.y = app.screen.height * 0.8;
+    nave.visible = true;
   }
 
-  function gameOver() {
-    state = 'over';
-    ship.visible = false;
-    burst(ship.x, ship.y, COLORS.green, 40, 260);
-    sfx.boom();
-    if (score > best) { best = score; store.set(best); }
+  function comecar() {
+    zerar();
+    estado = 'jogando';
+    som.inicio();
   }
 
-  function togglePause() {
-    if (state === 'playing') state = 'paused';
-    else if (state === 'paused') state = 'playing';
+  function fimDeJogo() {
+    estado = 'fim';
+    nave.visible = false;
+    explodir(nave.x, nave.y, COR.verde, 40, 260);
+    som.explosao();
+    if (pontos > recorde) {
+      recorde = pontos;
+      salvarRecorde(recorde);
+    }
   }
 
-  // ---------- input ----------
-  const keys = new Set();
-  let target = null;
-  const KEYMAP = { arrowleft: 'l', a: 'l', arrowright: 'r', d: 'r', arrowup: 'u', w: 'u', arrowdown: 'd', s: 'd' };
+  function pausar() {
+    if (estado === 'jogando') estado = 'pausado';
+    else if (estado === 'pausado') estado = 'jogando';
+  }
 
-  addEventListener('keydown', e => {
-    const k = e.key.toLowerCase();
-    if (KEYMAP[k]) { keys.add(KEYMAP[k]); target = null; e.preventDefault(); }
-    else if (k === 'p' || k === 'escape') togglePause();
-    else if (k === 'm') muted = !muted;
-    else if ((k === ' ' || k === 'enter') && (state === 'menu' || state === 'over')) startGame();
+  // ---------- controles ----------
+  const teclas = new Set();
+  let alvo = null; // onde o mouse/dedo tá puxando a nave
+  const MAPA = { arrowleft: 'e', a: 'e', arrowright: 'd', d: 'd', arrowup: 'c', w: 'c', arrowdown: 'b', s: 'b' };
+
+  addEventListener('keydown', ev => {
+    const k = ev.key.toLowerCase();
+    if (MAPA[k]) {
+      teclas.add(MAPA[k]);
+      alvo = null; // teclado assumiu, esquece o mouse
+      ev.preventDefault();
+    } else if (k === 'p' || k === 'escape') pausar();
+    else if (k === 'm') mudo = !mudo;
+    else if ((k === ' ' || k === 'enter') && (estado === 'menu' || estado === 'fim')) comecar();
   });
-  addEventListener('keyup', e => { const m = KEYMAP[e.key.toLowerCase()]; if (m) keys.delete(m); });
-  addEventListener('blur', () => { if (state === 'playing') state = 'paused'; });
+  addEventListener('keyup', ev => {
+    const d = MAPA[ev.key.toLowerCase()];
+    if (d) teclas.delete(d);
+  });
+  // se sair da aba, pausa pra não perder a partida
+  addEventListener('blur', () => { if (estado === 'jogando') estado = 'pausado'; });
 
-  function setTarget(e) {
-    // no toque, a nave fica acima do dedo para não ficar escondida
-    target = { x: e.clientX, y: e.clientY - (e.pointerType === 'touch' ? 70 : 0) };
+  function mirar(ev) {
+    // no celular a nave fica 70px acima do dedo, senão o dedo cobre ela
+    alvo = { x: ev.clientX, y: ev.clientY - (ev.pointerType === 'touch' ? 70 : 0) };
   }
-  addEventListener('pointermove', e => { if (e.pointerType !== 'mouse' || state === 'playing') setTarget(e); });
-  addEventListener('pointerdown', e => {
-    setTarget(e);
-    if (state === 'menu' || state === 'over') startGame();
-    else if (state === 'paused') state = 'playing';
+  addEventListener('pointermove', ev => {
+    if (ev.pointerType !== 'mouse' || estado === 'jogando') mirar(ev);
+  });
+  addEventListener('pointerdown', ev => {
+    mirar(ev);
+    if (estado === 'menu' || estado === 'fim') comecar();
+    else if (estado === 'pausado') estado = 'jogando';
   });
 
-  // ---------- atualização ----------
-  function update(dt) {
+  // ---------- loop principal ----------
+  function atualizar(dt) {
     const w = app.screen.width, h = app.screen.height;
-    time += dt;
+    tempo += dt;
 
-    // nave
+    // --- mexer a nave ---
     let vx = 0, vy = 0;
-    if (keys.size) {
-      vx = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0);
-      vy = (keys.has('d') ? 1 : 0) - (keys.has('u') ? 1 : 0);
-      const len = Math.hypot(vx, vy) || 1;
-      vx = (vx / len) * SHIP_SPEED; vy = (vy / len) * SHIP_SPEED;
-    } else if (target) {
-      vx = clamp((target.x - ship.x) * 10, -SHIP_SPEED * 1.6, SHIP_SPEED * 1.6);
-      vy = clamp((target.y - ship.y) * 10, -SHIP_SPEED * 1.6, SHIP_SPEED * 1.6);
+    if (teclas.size) {
+      vx = (teclas.has('d') ? 1 : 0) - (teclas.has('e') ? 1 : 0);
+      vy = (teclas.has('b') ? 1 : 0) - (teclas.has('c') ? 1 : 0);
+      const tam = Math.hypot(vx, vy) || 1; // normaliza pra diagonal não ser mais rápida
+      vx = (vx / tam) * VEL_NAVE;
+      vy = (vy / tam) * VEL_NAVE;
+    } else if (alvo) {
+      // segue o ponteiro com uma inércia leve
+      vx = limita((alvo.x - nave.x) * 10, -VEL_NAVE * 1.6, VEL_NAVE * 1.6);
+      vy = limita((alvo.y - nave.y) * 10, -VEL_NAVE * 1.6, VEL_NAVE * 1.6);
     }
-    ship.x = clamp(ship.x + vx * dt, 16, w - 16);
-    ship.y = clamp(ship.y + vy * dt, 16, h - 16);
-    ship.rotation = clamp(vx / SHIP_SPEED, -1, 1) * 0.25;
-    flame.scale.y = 0.7 + Math.random() * 0.6;
-    invuln = Math.max(0, invuln - dt);
-    ship.alpha = invuln > 0 ? (Math.floor(invuln * 12) % 2 ? 0.25 : 1) : 1;
+    nave.x = limita(nave.x + vx * dt, 16, w - 16);
+    nave.y = limita(nave.y + vy * dt, 16, h - 16);
+    nave.rotation = limita(vx / VEL_NAVE, -1, 1) * 0.25; // inclina um pouco ao virar
+    chama.scale.y = 0.7 + Math.random() * 0.6; // chama tremendo
+    invencivel = Math.max(0, invencivel - dt);
+    nave.alpha = invencivel > 0 ? (Math.floor(invencivel * 12) % 2 ? 0.25 : 1) : 1; // pisca
 
-    // tiro automático (nível da arma sobe com a pontuação)
-    fireTimer -= dt;
-    if (fireTimer <= 0) {
-      fireTimer = FIRE_DELAY;
-      const lvl = weaponLevel();
-      if (lvl === 1) spawnBullet(ship.x, ship.y - 20, 0);
-      else if (lvl === 2) { spawnBullet(ship.x - 9, ship.y - 14, 0); spawnBullet(ship.x + 9, ship.y - 14, 0); }
-      else { spawnBullet(ship.x, ship.y - 20, 0); spawnBullet(ship.x - 11, ship.y - 12, -110); spawnBullet(ship.x + 11, ship.y - 12, 110); }
-      sfx.shoot();
+    // --- atirar ---
+    timerTiro -= dt;
+    if (timerTiro <= 0) {
+      timerTiro = INTERVALO_TIRO;
+      const nv = nivelArma();
+      if (nv === 1) {
+        criarTiro(nave.x, nave.y - 20, 0);
+      } else if (nv === 2) {
+        criarTiro(nave.x - 9, nave.y - 14, 0);
+        criarTiro(nave.x + 9, nave.y - 14, 0);
+      } else {
+        criarTiro(nave.x, nave.y - 20, 0);
+        criarTiro(nave.x - 11, nave.y - 12, -110);
+        criarTiro(nave.x + 11, nave.y - 12, 110);
+      }
+      som.tiro();
     }
 
-    // meteoros (dificuldade cresce com o tempo)
-    spawnTimer -= dt;
-    if (spawnTimer <= 0) {
-      spawnTimer = Math.max(0.3, 1.05 - time * 0.012);
-      const roll = Math.random();
-      const size = roll < 0.45 ? 1 : roll < 0.8 ? 2 : 3;
-      const fall = Math.min(260, 90 + time * 2.5);
-      spawnRock(size, rand(0, w), -60, rand(-50, 50), rand(fall * 0.7, fall * 1.3));
+    // --- pedras: quanto mais tempo, mais rápido e mais frequente ---
+    timerPedra -= dt;
+    if (timerPedra <= 0) {
+      timerPedra = Math.max(0.3, 1.05 - tempo * 0.012);
+      const sorteio = Math.random();
+      const tam = sorteio < 0.45 ? 1 : sorteio < 0.8 ? 2 : 3;
+      const queda = Math.min(260, 90 + tempo * 2.5);
+      criarPedra(tam, rand(0, w), -60, rand(-50, 50), rand(queda * 0.7, queda * 1.3));
     }
 
-    for (const b of bullets) { b.x += b.vx * dt; b.y += b.vy * dt; }
-    for (const r of rocks) {
-      r.x += r.vx * dt; r.y += r.vy * dt; r.rotation += r.spin * dt;
-      if (r.x < -80) r.x = w + 80; else if (r.x > w + 80) r.x = -80;
+    for (const t of tiros) { t.x += t.vx * dt; t.y += t.vy * dt; }
+    for (const p of pedras) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.giro * dt;
+      // sai por um lado, volta pelo outro
+      if (p.x < -80) p.x = w + 80;
+      else if (p.x > w + 80) p.x = -80;
     }
-    for (const s of stars) {
-      s.g.y += s.speed * dt;
-      if (s.g.y > h) { s.g.y = 0; s.g.x = Math.random() * w; }
-    }
-    for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; p.alpha = Math.max(0, p.life / p.maxLife); }
+    moverEstrelas(dt);
+    moverFaiscas(dt);
 
-    // colisões: tiro × meteoro
-    for (const b of bullets) {
-      if (b.dead) continue;
-      for (const r of rocks) {
-        if (r.dead) continue;
-        if (dist2(b, r) < (b.radius + r.radius) ** 2) {
-          b.dead = true;
-          r.hp--;
-          if (r.hp > 0) { sfx.hit(); burst(b.x, b.y, COLORS.gold, 4, 90); r.scale.set(0.85 + r.hp / (r.size * 6.7)); break; }
-          r.dead = true;
-          score += r.size * 10;
-          burst(r.x, r.y, COLORS.gold, 8 + r.size * 4);
-          sfx.boom();
-          shake = Math.max(shake, r.size * 1.5);
-          if (r.size > 1) {
-            spawnRock(r.size - 1, r.x - 10, r.y, r.vx - 70, r.vy);
-            spawnRock(r.size - 1, r.x + 10, r.y, r.vx + 70, r.vy);
-          }
+    // --- tiro acertou pedra? ---
+    for (const t of tiros) {
+      if (t.morto) continue;
+      for (const p of pedras) {
+        if (p.morta) continue;
+        if (dist2(t, p) >= (t.raio + p.raio) ** 2) continue;
+
+        t.morto = true;
+        p.vida--;
+        if (p.vida > 0) {
+          // ainda aguenta, só dá um efeitinho
+          som.acerto();
+          explodir(t.x, t.y, COR.ouro, 4, 90);
+          p.scale.set(0.85 + p.vida / (p.tam * 6.7)); // encolhe um pouco pra dar feedback
           break;
         }
+        p.morta = true;
+        pontos += p.tam * 10;
+        explodir(p.x, p.y, COR.ouro, 8 + p.tam * 4);
+        som.explosao();
+        tremor = Math.max(tremor, p.tam * 1.5);
+        // pedra grande quebra em duas menores
+        if (p.tam > 1) {
+          criarPedra(p.tam - 1, p.x - 10, p.y, p.vx - 70, p.vy);
+          criarPedra(p.tam - 1, p.x + 10, p.y, p.vx + 70, p.vy);
+        }
+        break;
       }
     }
 
-    // colisão: nave × meteoro
-    if (invuln <= 0) {
-      for (const r of rocks) {
-        if (!r.dead && dist2(ship, r) < (ship.radius + r.radius) ** 2) {
-          r.dead = true;
-          lives--;
-          invuln = 2;
-          shake = 14;
-          burst(ship.x, ship.y, COLORS.green, 18, 200);
-          sfx.hurt();
-          if (lives <= 0) gameOver();
-          break;
-        }
+    // --- pedra acertou a nave? ---
+    if (invencivel <= 0) {
+      for (const p of pedras) {
+        if (p.morta || dist2(nave, p) >= (nave.raio + p.raio) ** 2) continue;
+        p.morta = true;
+        vidas--;
+        invencivel = 2;
+        tremor = 14;
+        explodir(nave.x, nave.y, COR.verde, 18, 200);
+        som.dano();
+        if (vidas <= 0) fimDeJogo();
+        break;
       }
     }
 
-    // limpeza de objetos mortos ou fora da tela
-    const prune = (list, keep) => list.filter(o => { if (keep(o)) return true; o.destroy(); return false; });
-    bullets = prune(bullets, b => !b.dead && b.y > -30 && b.x > -30 && b.x < w + 30);
-    rocks = prune(rocks, r => !r.dead && r.y < h + 100);
-    particles = prune(particles, p => p.life > 0);
+    // --- limpa o que morreu ou saiu da tela (senão vaza memória) ---
+    const limpar = (lista, fica) => lista.filter(o => {
+      if (fica(o)) return true;
+      o.destroy();
+      return false;
+    });
+    tiros = limpar(tiros, t => !t.morto && t.y > -30 && t.x > -30 && t.x < w + 30);
+    pedras = limpar(pedras, p => !p.morta && p.y < h + 100);
+    faiscas = limpar(faiscas, f => f.vida > 0);
   }
 
-  // ---------- render de HUD / mensagens ----------
-  function drawHud() {
+  function desenharTextos() {
     const w = app.screen.width, h = app.screen.height;
-    scoreText.text = `PONTOS ${score}`;
-    livesText.text = `VIDAS ${Math.max(lives, 0)}  ARMA ${weaponLevel()}`;
-    bestText.text = `RECORDE ${Math.max(best, score)}`;
-    scoreText.position.set(16, 14);
-    livesText.position.set(w - 16, 14);
-    bestText.position.set(16, 40);
-    centerText.position.set(w / 2, h / 2 - 20);
-    subText.position.set(w / 2, h / 2 + 26);
+    txtPontos.text = `PONTOS ${pontos}`;
+    txtVidas.text = `VIDAS ${Math.max(vidas, 0)}  ARMA ${nivelArma()}`;
+    txtRecorde.text = `RECORDE ${Math.max(recorde, pontos)}`;
+    txtPontos.position.set(16, 14);
+    txtVidas.position.set(w - 16, 14);
+    txtRecorde.position.set(16, 40);
+    txtTitulo.position.set(w / 2, h / 2 - 20);
+    txtAjuda.position.set(w / 2, h / 2 + 26);
 
-    const msgs = {
-      menu: ['METEOR DASH', 'Mova com WASD / setas / mouse / toque · tiro automático\nClique ou ESPAÇO para jogar'],
-      paused: ['PAUSADO', 'Clique ou P para continuar'],
-      over: ['FIM DE JOGO', `Você fez ${score} pontos${score >= best && score > 0 ? ' — novo recorde!' : ''}\nClique ou ESPAÇO para jogar de novo`],
-      playing: ['', ''],
-    }[state];
-    centerText.text = msgs[0];
-    subText.text = msgs[1];
+    const novoRecorde = pontos >= recorde && pontos > 0 ? ' - novo recorde!' : '';
+    const mensagens = {
+      menu: ['METEOR DASH', 'WASD / setas / mouse / toque, o tiro é automático\nClique ou ESPAÇO pra jogar'],
+      pausado: ['PAUSADO', 'Clique ou P pra continuar'],
+      fim: ['FIM DE JOGO', `Você fez ${pontos} pontos${novoRecorde}\nClique ou ESPAÇO pra jogar de novo`],
+      jogando: ['', ''],
+    };
+    [txtTitulo.text, txtAjuda.text] = mensagens[estado];
   }
 
-  // ---------- loop ----------
-  app.ticker.add(t => {
-    const dt = Math.min(t.deltaMS / 1000, 0.05);
-    if (state === 'playing') update(dt);
-    else if (state === 'menu' || state === 'over') {
-      // fundo e partículas continuam vivos nos menus
-      for (const s of stars) { s.g.y += s.speed * dt; if (s.g.y > app.screen.height) { s.g.y = 0; s.g.x = Math.random() * app.screen.width; } }
-      for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; p.alpha = Math.max(0, p.life / p.maxLife); }
-      particles = particles.filter(p => { if (p.life > 0) return true; p.destroy(); return false; });
+  app.ticker.add(ticker => {
+    // limita o dt: se a aba travar um pouco, os meteoros não teletransportam
+    const dt = Math.min(ticker.deltaMS / 1000, 0.05);
+
+    if (estado === 'jogando') {
+      atualizar(dt);
+    } else if (estado === 'menu' || estado === 'fim') {
+      // fundo continua animado no menu e na tela de fim
+      moverEstrelas(dt);
+      moverFaiscas(dt);
+      faiscas = faiscas.filter(f => {
+        if (f.vida > 0) return true;
+        f.destroy();
+        return false;
+      });
     }
-    // tremor de tela
-    shake = Math.max(0, shake - dt * 30);
-    world.position.set(rand(-shake, shake), rand(-shake, shake));
-    drawHud();
+
+    tremor = Math.max(0, tremor - dt * 30);
+    mundo.position.set(rand(-tremor, tremor), rand(-tremor, tremor));
+    desenharTextos();
   });
 
-  ship.x = app.screen.width / 2;
-  ship.y = app.screen.height * 0.8;
-  ship.visible = false;
+  // posição inicial (a nave só aparece depois do primeiro clique)
+  nave.x = app.screen.width / 2;
+  nave.y = app.screen.height * 0.8;
+  nave.visible = false;
 
-  // gancho para testes automatizados no console
-  window.__game = { get state() { return state; }, get score() { return score; }, get lives() { return lives; }, rocks: () => rocks.length, bullets: () => bullets.length };
+  // TODO: power-up de escudo, e talvez um boss a cada 5000 pontos
 })();
