@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thales Hajes — Game Developer</title>
+<meta name="description" content="Portfólio de Thales Miguel Hajes, desenvolvedor de jogos e cofundador da Scorpion Bits. Jogos 2D em Godot com exportação HTML5, jogáveis no navegador.">
+<style>
+  :root {
+    --bg: #0d1110;
+    --panel: #151b19;
+    --line: #25302c;
+    --text: #e8efeb;
+    --muted: #8fa199;
+    --accent: #7dff9b;
+    --accent-2: #f5c84c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+
+  nav { position: fixed; inset: 0 0 auto 0; z-index: 10; background: rgba(13,17,16,.8); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; justify-content: space-between; align-items: center; height: 56px; }
+  nav .logo { font-weight: 800; letter-spacing: .5px; color: var(--text); }
+  nav .logo span { color: var(--accent); }
+  nav ul { display: flex; gap: 22px; list-style: none; font-size: 14px; }
+  nav ul a { color: var(--muted); }
+  nav ul a:hover { color: var(--text); text-decoration: none; }
+
+  header.hero { position: relative; height: 100vh; min-height: 560px; display: grid; place-items: center; overflow: hidden; }
+  #pixi { position: absolute; inset: 0; }
+  .hero-text { position: relative; z-index: 2; text-align: center; padding: 0 20px; pointer-events: none; }
+  .hero-text a, .hero-text .btn { pointer-events: auto; }
+  .tag { display: inline-block; font: 600 12px/1 ui-monospace, Consolas, monospace; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); padding: 7px 12px; border-radius: 99px; margin-bottom: 22px; }
+  h1 { font-size: clamp(2.4rem, 7vw, 4.6rem); line-height: 1.05; letter-spacing: -1px; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .hero-text p { max-width: 560px; margin: 18px auto 28px; color: var(--muted); font-size: 1.1rem; }
+  .btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn { padding: 12px 22px; border-radius: 8px; font-weight: 700; border: 1px solid var(--accent); }
+  .btn.primary { background: var(--accent); color: #07140b; }
+  .btn.primary:hover { text-decoration: none; filter: brightness(1.1); }
+  .btn.ghost:hover { background: rgba(125,255,155,.1); text-decoration: none; }
+  .hint { position: absolute; bottom: 18px; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--muted); z-index: 2; }
+
+  section { padding: 84px 0 12px; }
+  h2 { font-size: 1.7rem; margin-bottom: 8px; }
+  h2::before { content: "// "; color: var(--accent); font-family: ui-monospace, Consolas, monospace; }
+  .sub { color: var(--muted); margin-bottom: 28px; }
+
+  .games { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+  .card h3 { font-size: 1.3rem; }
+  .card .meta { font: 12px/1.4 ui-monospace, Consolas, monospace; color: var(--accent-2); }
+  .card p { color: var(--muted); font-size: .95rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 12px; padding: 3px 10px; border-radius: 99px; background: #1d2622; color: var(--muted); border: 1px solid var(--line); }
+  .links { margin-top: auto; display: flex; gap: 16px; font-weight: 600; font-size: .95rem; padding-top: 6px; }
+
+  .about { display: grid; grid-template-columns: 1.4fr 1fr; gap: 32px; }
+  .about p { color: var(--muted); margin-bottom: 14px; }
+  .about p strong { color: var(--text); }
+  .stack { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  .stack h3 { font-size: .8rem; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin: 14px 0 8px; }
+  .stack h3:first-child { margin-top: 0; }
+
+  .repos { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .repo { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: block; color: var(--text); }
+  .repo:hover { border-color: var(--accent); text-decoration: none; }
+  .repo b { display: block; margin-bottom: 4px; }
+  .repo span { color: var(--muted); font-size: .85rem; }
+
+  .contact { text-align: center; padding-bottom: 60px; }
+  .contact .btns { margin-top: 20px; }
+  footer { border-top: 1px solid var(--line); padding: 22px 0; text-align: center; color: var(--muted); font-size: 13px; }
+
+  @media (max-width: 720px) {
+    nav ul { gap: 14px; font-size: 13px; }
+    .about { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#top">THALES<span>.HAJES</span></a>
+    <ul>
+      <li><a href="#jogos">Jogos</a></li>
+      <li><a href="#sobre">Sobre</a></li>
+      <li><a href="#codigo">Código</a></li>
+      <li><a href="#contato">Contato</a></li>
+    </ul>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div id="pixi" aria-hidden="true"></div>
+  <div class="hero-text">
+    <span class="tag">Game Developer · Araraquara, SP</span>
+    <h1>Eu construo jogos <em>2D</em> que rodam direto no navegador.</h1>
+    <p>Cofundador da Scorpion Bits. Desenvolvo, publico e itero jogos completos — da mecânica ao build HTML5.</p>
+    <div class="btns">
+      <a class="btn primary" href="#jogos">Ver jogos</a>
+      <a class="btn ghost" href="https://scorpionbits.itch.io/tirania" target="_blank" rel="noopener">Jogar Tirania ↗</a>
+    </div>
+  </div>
+  <div class="hint">O fundo é uma cena PixiJS — mova o mouse ou toque na tela.</div>
+</header>
+
+<main class="wrap">
+
+  <section id="jogos">
+    <h2>Jogos</h2>
+    <p class="sub">Projetos publicados no itch.io pela Scorpion Bits.</p>
+    <div class="games">
+      <article class="card">
+        <span class="meta">Arcade · PixiJS v8 · HTML5 · Mobile e desktop</span>
+        <h3>Meteor Dash <small style="color:var(--accent)">novo</small></h3>
+        <p>Mini-jogo feito do zero em PixiJS, sem nenhum asset externo (tudo é desenhado por código). Tiro automático, meteoros que se dividem, arma que evolui com a pontuação, partículas, screen shake, som via WebAudio e recorde salvo no navegador.</p>
+        <div class="chips"><span class="chip">PixiJS</span><span class="chip">JavaScript</span><span class="chip">Touch + teclado</span><span class="chip">Game loop</span></div>
+        <div class="links">
+          <a href="meteor-dash/">Jogar agora ↗</a>
+          <a href="https://github.com/ThalesMiguelHajes/ThalesMiguelHajes/tree/main/meteor-dash" target="_blank" rel="noopener">Código ↗</a>
+        </div>
+      </article>
+      <article class="card">
+        <span class="meta">Action · Godot · HTML5 / Windows / Linux</span>
+        <h3>Tirania</h3>
+        <p>Jogo de ação em que Aurora precisa retomar os recursos de um reino faminto: explorar o palácio, resgatar suprimentos e enfrentar o rei tirano em um duelo final. Jogável no navegador.</p>
+        <div class="chips"><span class="chip">Combate</span><span class="chip">Boss fight</span><span class="chip">Coleta de recursos</span><span class="chip">Sem IA generativa</span></div>
+        <div class="links">
+          <a href="https://scorpionbits.itch.io/tirania" target="_blank" rel="noopener">Jogar no navegador ↗</a>
+        </div>
+      </article>
+      <article class="card">
+        <span class="meta">Arcade · Godot · Windows / Linux · Protótipo</span>
+        <h3>AstroDash</h3>
+        <p>Arcade espacial em pixel art: sobreviva a ondas infinitas de meteoros sozinho ou em co-op local, ou enfrente um amigo no modo versus empurrando a nave dele para um buraco negro.</p>
+        <div class="chips"><span class="chip">Pixel art</span><span class="chip">Co-op local</span><span class="chip">Versus</span><span class="chip">Física</span></div>
+        <div class="links">
+          <a href="https://scorpionbits.itch.io/astrodash" target="_blank" rel="noopener">Ver no itch.io ↗</a>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="sobre">
+    <h2>Sobre</h2>
+    <div class="about">
+      <div>
+        <p>Sou <strong>Thales Miguel Hajes</strong>, desenvolvedor de jogos e cofundador da <strong>Scorpion Bits</strong>, um estúdio indie onde trabalho em equipe para transformar ideias em experiências jogáveis.</p>
+        <p>No estúdio passo por todo o ciclo: <strong>programação de gameplay, game design, UI e identidade visual</strong>. Minha formação em Análise e Desenvolvimento de Sistemas (IFSP) e minha experiência em gestão de projetos me ajudam a entregar dentro do prazo e a trabalhar bem com time.</p>
+        <p>Estou me aprofundando no ecossistema web para jogos — <strong>HTML5, JavaScript e PixiJS</strong> — e busco minha primeira vaga como Front-end Game Developer júnior.</p>
+      </div>
+      <aside class="stack">
+        <h3>Jogos</h3>
+        <div class="chips"><span class="chip">Godot / GDScript</span><span class="chip">Export HTML5</span><span class="chip">Game design</span></div>
+        <h3>Web</h3>
+        <div class="chips"><span class="chip">HTML</span><span class="chip">CSS</span><span class="chip">JavaScript</span><span class="chip">PixiJS (estudando)</span></div>
+        <h3>Arte e áudio</h3>
+        <div class="chips"><span class="chip">Aseprite</span><span class="chip">Photoshop</span><span class="chip">Illustrator</span><span class="chip">After Effects</span><span class="chip">FL Studio</span></div>
+        <h3>Ferramentas</h3>
+        <div class="chips"><span class="chip">Git / GitHub</span><span class="chip">Documentação</span></div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="codigo">
+    <h2>Código</h2>
+    <p class="sub">Alguns repositórios públicos no GitHub.</p>
+    <div class="repos">
+      <a class="repo" href="https://github.com/scorpion-bits/TowerDefence" target="_blank" rel="noopener"><b>TowerDefence</b><span>Protótipo de tower defense · GDScript</span></a>
+      <a class="repo" href="https://github.com/scorpion-bits/Bullet-Hell" target="_blank" rel="noopener"><b>Bullet-Hell</b><span>Protótipo de bullet hell · GDScript</span></a>
+      <a class="repo" href="https://github.com/scorpion-bits/gamelab-sesc" target="_blank" rel="noopener"><b>gamelab-sesc</b><span>Projeto de jogo · GDScript</span></a>
+      <a class="repo" href="https://github.com/ThalesMiguelHajes/godot-audio-slides" target="_blank" rel="noopener"><b>godot-audio-slides</b><span>Slides sobre áudio e música na Godot · HTML</span></a>
+    </div>
+  </section>
+
+  <section id="contato" class="contact">
+    <h2>Vamos conversar?</h2>
+    <p class="sub">Disponível para começar em 30 de setembro de 2026 · Remoto</p>
+    <div class="btns">
+      <a class="btn primary" href="https://www.linkedin.com/in/thalesmiguelhajes/" target="_blank" rel="noopener">LinkedIn</a>
+      <a class="btn ghost" href="https://github.com/scorpion-bits" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn ghost" href="https://scorpionbits.itch.io/" target="_blank" rel="noopener">itch.io</a>
+      <a class="btn ghost" href="mailto:hajesthales@gmail.com">E-mail</a>
+    </div>
+  </section>
+</main>
+
+<footer>© 2026 Thales Hajes · Feito à mão com HTML, CSS e PixiJS</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@8.6.6/dist/pixi.min.js"></script>
+<script>
+(async () => {
+  const host = document.getElementById('pixi');
+  if (!window.PIXI || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  const app = new PIXI.Application();
+  await app.init({ resizeTo: host, background: 0x0d1110, antialias: true, resolution: Math.min(devicePixelRatio, 2), autoDensity: true });
+  host.appendChild(app.canvas);
+
+  const mouse = { x: -9999, y: -9999 };
+  const pointer = e => { const r = host.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; };
+  addEventListener('pointermove', pointer);
+  addEventListener('pointerdown', pointer);
+
+  const colors = [0x7dff9b, 0x7dff9b, 0xf5c84c, 0xffffff];
+  const stars = [];
+  const count = innerWidth < 720 ? 90 : 180;
+  for (let i = 0; i < count; i++) {
+    const g = new PIXI.Graphics();
+    const r = 1 + Math.random() * 2.2;
+    g.circle(0, 0, r).fill({ color: colors[i % colors.length], alpha: 0.35 + Math.random() * 0.6 });
+    g.x = Math.random() * app.screen.width;
+    g.y = Math.random() * app.screen.height;
+    app.stage.addChild(g);
+    stars.push({ g, vx: (Math.random() - .5) * .25, vy: .15 + Math.random() * .6, ox: 0, oy: 0 });
+  }
+
+  app.ticker.add(t => {
+    const w = app.screen.width, h = app.screen.height, dt = t.deltaTime;
+    for (const s of stars) {
+      s.g.x += s.vx * dt;
+      s.g.y += s.vy * dt;
+      const dx = s.g.x - mouse.x, dy = s.g.y - mouse.y, d2 = dx * dx + dy * dy;
+      if (d2 < 14000) {
+        const d = Math.sqrt(d2) || 1, f = (1 - d / 118) * 2.4;
+        s.g.x += (dx / d) * f * dt;
+        s.g.y += (dy / d) * f * dt;
+      }
+      if (s.g.y > h + 6) { s.g.y = -6; s.g.x = Math.random() * w; }
+      if (s.g.x > w + 6) s.g.x = -6;
+      if (s.g.x < -6) s.g.x = w + 6;
+    }
+  });
+})();
+</script>
+</body>
+</html>
